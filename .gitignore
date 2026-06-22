@@ -1,0 +1,30 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Streamlit
+.streamlit/
+
+# Reports and data
+reports/
+datasets/
+
+# Credentials and environment
+credentials/
+credentials/service_account.json
+.env
+.streamlit/secrets.toml
+
+# Model artifacts
+*.joblib
+*.pkl
+
+# IDEs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
