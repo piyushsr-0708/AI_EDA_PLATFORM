@@ -61,6 +61,14 @@ st.sidebar.header("Dataset Upload")
 
 uploaded_file = st.sidebar.file_uploader("Upload CSV File", type=["csv"])
 
+# Cloud sync settings
+st.sidebar.header("Cloud Sync")
+cloud_sync = st.sidebar.checkbox(
+    "Upload Results To BigQuery",
+    value=False,
+    help="When enabled, run metadata, dataset profile and training metrics will be uploaded to BigQuery (Phase 1).",
+)
+
 
 class ProcessedDataset(NamedTuple):
     df: pd.DataFrame
@@ -484,6 +492,85 @@ if uploaded_file is not None:
                         "eda_pdf": "eda_report.pdf",
                         "training_pdf": "training_report.pdf"
                     })
+                    # Optionally upload metadata and metrics to BigQuery (Phase 1)
+                    if cloud_sync:
+                        try:
+                            import os
+                            from modules import bigquery_connector
+                            # connect client (uses env vars or GOOGLE_APPLICATION_CREDENTIALS)
+                            try:
+                                client = bigquery_connector.connect_bigquery()
+                            except Exception as e:
+                                st.warning(f"BigQuery client not available: {e}")
+                                client = None
+
+                            if client is not None:
+                                dataset_id = os.getenv("BIGQUERY_DATASET", "ai_eda_platform")
+                                # Prepare run_metadata row
+                                from datetime import datetime
+                                ts = datetime.utcnow().isoformat()
+                                run_meta_row = {
+                                    "run_id": st.session_state.get("run_id"),
+                                    "dataset_name": uploaded_file.name,
+                                    "target_column": target_column,
+                                    "task_type": problem_type,
+                                    "best_model": best_name,
+                                    "run_timestamp": ts,
+                                }
+                                try:
+                                    res = bigquery_connector.upload_run_metadata(client, dataset_id, run_meta_row)
+                                    if res.get("status") == "ok":
+                                        st.success("Run metadata uploaded to BigQuery.")
+                                    else:
+                                        st.warning(f"Run metadata upload returned: {res}")
+                                except Exception as e:
+                                    st.warning(f"Failed to upload run metadata: {e}")
+
+                                # Prepare dataset profile row
+                                profile_row = {
+                                    "run_id": st.session_state.get("run_id"),
+                                    "dataset_name": uploaded_file.name,
+                                    "rows": int(profile.get("rows", 0)),
+                                    "columns": int(profile.get("columns", 0)),
+                                    "missing_values": int(profile.get("total_missing", 0)),
+                                    "duplicate_rows": int(profile.get("duplicate_rows", 0)),
+                                    "timestamp": ts,
+                                }
+                                try:
+                                    res = bigquery_connector.upload_dataset_profile(client, dataset_id, profile_row)
+                                    if res.get("status") == "ok":
+                                        st.success("Dataset profile uploaded to BigQuery.")
+                                    else:
+                                        st.warning(f"Dataset profile upload returned: {res}")
+                                except Exception as e:
+                                    st.warning(f"Failed to upload dataset profile: {e}")
+
+                                # Prepare training metrics row (extract best model metrics if present)
+                                best_metrics = metrics.get(best_name, {}) if isinstance(metrics, dict) else {}
+                                tm_row = {
+                                    "run_id": st.session_state.get("run_id"),
+                                    "task_type": problem_type,
+                                    "target_column": target_column,
+                                    "best_model": best_name,
+                                    "accuracy": float(best_metrics.get("accuracy")) if best_metrics.get("accuracy") is not None else None,
+                                    "f1": float(best_metrics.get("f1")) if best_metrics.get("f1") is not None else None,
+                                    "precision": float(best_metrics.get("precision")) if best_metrics.get("precision") is not None else None,
+                                    "recall": float(best_metrics.get("recall")) if best_metrics.get("recall") is not None else None,
+                                    "r2": float(best_metrics.get("r2")) if best_metrics.get("r2") is not None else None,
+                                    "rmse": float(best_metrics.get("rmse")) if best_metrics.get("rmse") is not None else None,
+                                    "mae": float(best_metrics.get("mae")) if best_metrics.get("mae") is not None else None,
+                                    "timestamp": ts,
+                                }
+                                try:
+                                    res = bigquery_connector.upload_training_metrics(client, dataset_id, tm_row)
+                                    if res.get("status") == "ok":
+                                        st.success("Training metrics uploaded to BigQuery.")
+                                    else:
+                                        st.warning(f"Training metrics upload returned: {res}")
+                                except Exception as e:
+                                    st.warning(f"Failed to upload training metrics: {e}")
+                        except Exception as e:
+                            st.warning(f"Unexpected BigQuery error: {e}")
                 except Exception as e:
                     st.error(f"Failed to generate or save reports: {e}")
 

@@ -1,0 +1,29 @@
+# Clean, compatibility-focused requirements for AI_EDA_PLATFORM
+# Use conservative ranges and prefer >= to allow security updates.
+
+streamlit>=1.18.0,<2.0
+pandas>=2.1.0,<3.0
+numpy>=2.2.0,<3.0
+scikit-learn>=1.2.2,<2.0
+plotly>=5.13.1,<7.0
+reportlab>=4.0.0,<5.0
+joblib>=1.2.0,<2.0
+prophet>=1.1.1,<2.0
+statsmodels>=0.14.0,<1.0
+
+# BigQuery & cloud dependencies
+google-cloud-bigquery>=3.42.0,<4.0
+google-api-core>=2.11.0,<3.0
+grpcio>=1.49.0,<2.0
+protobuf>=4.21.0,<5.0
+pyarrow>=11.0.0,<13.0.0
+
+# Optional: pandas-gbq if you plan to use pandas-to-bigquery convenience APIs
+pandas-gbq>=0.20.0,<0.22.0
+
+# Dev / env helpers
+python-dotenv>=1.0.0
+
+# Notes:
+# - After installing, run `pip check` and consider creating a lockfile with pip-compile.
+# - These ranges are chosen to be compatible with each other and with Prophet/Statsmodels.
