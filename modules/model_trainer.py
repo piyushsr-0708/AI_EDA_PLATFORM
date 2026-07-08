@@ -18,19 +18,37 @@ Supported models:
 
 Only scikit-learn is used.
 """
+import time
 from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
 
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    RandomForestRegressor,
+    ExtraTreesClassifier,
+    ExtraTreesRegressor,
+    GradientBoostingClassifier,
+    GradientBoostingRegressor,
+)
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.linear_model import (
+    LinearRegression,
+    LogisticRegression,
+    Ridge,
+    Lasso,
+    ElasticNet,
+)
 from sklearn.model_selection import train_test_split
 from sklearn.base import clone
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, LabelEncoder
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.naive_bayes import GaussianNB
 from sklearn import metrics
 
 
@@ -79,14 +97,37 @@ def _build_preprocessor(X: pd.DataFrame):
 def _get_models(problem_type: str):
     """Return a dict of name->estimator objects (unfitted) for the problem type."""
     if problem_type.lower() == "regression":
-        return {
-            "LinearRegression": LinearRegression(),
-            "RandomForestRegressor": RandomForestRegressor(random_state=42),
+        models = {
+            "Linear Regression": LinearRegression(),
+            "Ridge": Ridge(random_state=42),
+            "Lasso": Lasso(random_state=42),
+            "ElasticNet": ElasticNet(random_state=42),
+            "Decision Tree": DecisionTreeRegressor(random_state=42),
+            "Random Forest": RandomForestRegressor(random_state=42),
+            "Extra Trees": ExtraTreesRegressor(random_state=42),
+            "Gradient Boosting": GradientBoostingRegressor(random_state=42),
         }
+        try:
+            from xgboost import XGBRegressor
+            models["XGBoost"] = XGBRegressor(random_state=42, verbosity=0)
+        except Exception:
+            pass
+        try:
+            from lightgbm import LGBMRegressor
+            models["LightGBM"] = LGBMRegressor(random_state=42)
+        except Exception:
+            pass
+        return models
     elif problem_type.lower() == "classification":
         return {
-            "LogisticRegression": LogisticRegression(max_iter=1000),
-            "RandomForestClassifier": RandomForestClassifier(random_state=42),
+            "Logistic Regression": LogisticRegression(max_iter=1000),
+            "Decision Tree": DecisionTreeClassifier(random_state=42),
+            "Random Forest": RandomForestClassifier(random_state=42),
+            "Extra Trees": ExtraTreesClassifier(random_state=42),
+            "Gradient Boosting": GradientBoostingClassifier(random_state=42),
+            "KNN": KNeighborsClassifier(),
+            "SVM": SVC(probability=True),
+            "GaussianNB": GaussianNB(),
         }
     else:
         raise ValueError(f"Unsupported problem_type: {problem_type}")
@@ -94,6 +135,12 @@ def _get_models(problem_type: str):
 
 def _evaluate_regression(y_true, y_pred):
     r2 = float(metrics.r2_score(y_true, y_pred))
+    mae = float(metrics.mean_absolute_error(y_true, y_pred))
+    rmse = float(np.sqrt(metrics.mean_squared_error(y_true, y_pred)))
+    try:
+        mape = float(metrics.mean_absolute_percentage_error(y_true, y_pred))
+    except Exception:
+        mape = None
     
     if r2 < 0.30:
         interp = "Weak predictive power"
@@ -102,15 +149,18 @@ def _evaluate_regression(y_true, y_pred):
     else:
         interp = "Strong predictive power"
         
-    return {
+    result = {
         "r2": r2,
-        "rmse": float(np.sqrt(metrics.mean_squared_error(y_true, y_pred))),
-        "mae": float(metrics.mean_absolute_error(y_true, y_pred)),
+        "mae": mae,
+        "rmse": rmse,
         "interpretation": interp
     }
+    if mape is not None:
+        result["mape"] = mape
+    return result
 
 
-def _evaluate_classification(y_true, y_pred, average: str = "weighted"):
+def _evaluate_classification(y_true, y_pred, y_score=None, average: str = "weighted"):
     acc = float(metrics.accuracy_score(y_true, y_pred))
     
     if acc < 0.60:
@@ -120,13 +170,26 @@ def _evaluate_classification(y_true, y_pred, average: str = "weighted"):
     else:
         interp = "Strong performance"
         
-    return {
+    result = {
         "accuracy": acc,
         "f1": float(metrics.f1_score(y_true, y_pred, average=average)),
         "precision": float(metrics.precision_score(y_true, y_pred, average=average, zero_division=0)),
         "recall": float(metrics.recall_score(y_true, y_pred, average=average, zero_division=0)),
         "interpretation": interp
     }
+    if y_score is not None:
+        try:
+            if hasattr(y_score, "shape") and len(y_score.shape) == 2:
+                if y_score.shape[1] == 2:
+                    roc_auc = metrics.roc_auc_score(y_true, y_score[:, 1])
+                else:
+                    roc_auc = metrics.roc_auc_score(y_true, y_score, multi_class="ovr", average=average)
+            else:
+                roc_auc = metrics.roc_auc_score(y_true, y_score)
+            result["roc_auc"] = float(roc_auc)
+        except Exception:
+            pass
+    return result
 
 
 def train_and_select_model(
@@ -202,13 +265,31 @@ def train_and_select_model(
     for name, estimator in models.items():
         pipeline = Pipeline([("preproc", _build_preprocessor(X_train)), ("est", estimator)])
         try:
+            start_time = time.time()
             pipeline.fit(X_train, y_train)
+            fit_time = time.time() - start_time
+            
             y_pred = pipeline.predict(X_test)
+            y_score = None
+            if problem_type.lower() == "classification":
+                if hasattr(pipeline, "predict_proba"):
+                    try:
+                        y_score = pipeline.predict_proba(X_test)
+                    except Exception:
+                        y_score = None
+                elif hasattr(pipeline, "decision_function"):
+                    try:
+                        y_score = pipeline.decision_function(X_test)
+                    except Exception:
+                        y_score = None
+
             if problem_type.lower() == "regression":
                 metric = _evaluate_regression(y_test, y_pred)
             else:
                 average = "binary" if n_classes == 2 else "weighted"
-                metric = _evaluate_classification(y_test, y_pred, average)
+                metric = _evaluate_classification(y_test, y_pred, y_score=y_score, average=average)
+            
+            metric["Training Time (s)"] = round(fit_time, 4)
             results[name] = metric
             fitted_pipelines[name] = pipeline
         except Exception as e:
@@ -245,6 +326,23 @@ def train_and_select_model(
         raise RuntimeError("Best model pipeline not available for predictions")
 
     y_pred_test = best_candidate_pipeline.predict(X_test)
+    
+    y_score_test = None
+    if problem_type.lower() == "classification":
+        if hasattr(best_candidate_pipeline, "predict_proba"):
+            try:
+                y_score_test = best_candidate_pipeline.predict_proba(X_test)
+            except Exception:
+                pass
+        elif hasattr(best_candidate_pipeline, "decision_function"):
+            try:
+                y_score_test = best_candidate_pipeline.decision_function(X_test)
+            except Exception:
+                pass
+        
+        if y_score_test is not None:
+            if isinstance(y_score_test, np.ndarray):
+                y_score_test = y_score_test.tolist()
 
     # Retrain best model on full dataset using a fresh estimator
     y_full = y
@@ -259,22 +357,31 @@ def train_and_select_model(
     
     best_pipeline.fit(X, y_full)
 
-    # Extract feature importances for tree-based models
+    # Extract feature importances for tree-based models or coefficients for linear models
     feature_importance = None
     try:
         estimator = best_pipeline.named_steps["est"]
+        importances_array = None
         if hasattr(estimator, "feature_importances_"):
+            importances_array = estimator.feature_importances_
+        elif hasattr(estimator, "coef_"):
+            coef = np.abs(estimator.coef_)
+            if len(coef.shape) > 1:
+                importances_array = np.mean(coef, axis=0)
+            else:
+                importances_array = coef
+                
+        if importances_array is not None:
             preprocessor = best_pipeline.named_steps["preproc"]
             # Get transformed feature names
             try:
                 raw_names = preprocessor.get_feature_names_out()
                 feature_names = [name.split("__")[-1] if "__" in name else name for name in raw_names]
             except Exception:
-                feature_names = [f"feature_{i}" for i in range(len(estimator.feature_importances_))]
+                feature_names = [f"feature_{i}" for i in range(len(importances_array))]
             
-            importances = estimator.feature_importances_
             fi_dict = dict(sorted(
-                zip(feature_names, importances),
+                zip(feature_names, importances_array),
                 key=lambda x: x[1],
                 reverse=True
             ))
@@ -288,6 +395,7 @@ def train_and_select_model(
         "best_model": best_pipeline,
         "metrics": results,
         "y_pred": list(y_pred_test),
+        "y_score": y_score_test,
         "y_test": list(y_test_original),
         "problem_type": problem_type.lower(),
         "feature_columns": X.columns.tolist(),

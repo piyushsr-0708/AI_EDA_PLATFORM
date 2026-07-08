@@ -55,13 +55,23 @@ def profile_dataset(df):
     profile['binary_columns'] = binary_columns
     
     date_candidates = []
-    for column in df.select_dtypes(include = ['object','category']).columns:
-        sample = df[column].dropna().head(50)
-        if len(sample)==0:
+    for column in df.select_dtypes(include=['object', 'category']).columns:
+        sample = df[column].dropna().astype(str).head(50)
+        if sample.empty:
             continue
-        converted = pd.to_datetime(sample, errors = 'coerce')
-        success_rate = converted.notna().sum()/len(sample)
-        if success_rate>0.8:
+
+        converted = pd.to_datetime(sample, errors='coerce')
+        success_rate = converted.notna().sum() / len(sample)
+
+        if success_rate < 0.8:
+            converted = pd.to_datetime(
+                sample,
+                errors='coerce',
+                dayfirst=True
+            )
+            success_rate = converted.notna().sum() / len(sample)
+
+        if success_rate >= 0.8:
             date_candidates.append(column)
     profile['date_candidates'] = date_candidates
 

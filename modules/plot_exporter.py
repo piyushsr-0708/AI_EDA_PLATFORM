@@ -5,7 +5,7 @@ so that no more than one Plotly figure is in memory at any moment.
 """
 from pathlib import Path
 import re
-from typing import List
+from typing import List, Tuple
 import pandas as pd
 
 
@@ -18,7 +18,7 @@ def export_eda_plots(
     plots_dir: Path,
     cleaned_df: pd.DataFrame,
     raw_df: pd.DataFrame = None,
-) -> tuple[List[str], List[str]]:
+) -> Tuple[List[str], List[str]]:
     """Export EDA plots by regenerating figures one at a time.
 
     This avoids holding all Plotly figures in memory simultaneously.

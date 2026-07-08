@@ -155,7 +155,7 @@ def generate_dataset_pdf(
     # Embed plot images
     if plot_files:
         from pathlib import Path
-        output_dir = Path(output_path).parent / "plots"
+        output_dir = Path(output_path).parent.parent / "plots"
         
         correlation_plots = []
         distribution_plots = []
@@ -241,91 +241,86 @@ def generate_training_pdf(
     output_path: str,
     dataset_name: str = "",
     target_column: str = "",
-    prediction_summary: Dict[str, str] = None
+    dataset_profile: Dict[str, Any] = None,
+    metrics_df: pd.DataFrame = None,
+    visualizations: List[str] = None,
+    prediction_preview: pd.DataFrame = None,
+    forecast_preview: pd.DataFrame = None
 ):
-    """Generate the model training PDF report."""
+    """Generate the model training PDF report with a strict professional order."""
     sections = []
     
-    problem_content = []
-    if target_column:
-        problem_content.append(f"Target Column: {target_column}")
-    problem_content.append(f"Detected Task Type: {problem_type.upper()}")
+    # 1. Dataset Summary
+    if dataset_profile:
+        summary_lines = [
+            f"Dataset Name: {dataset_name}",
+            f"Rows: {dataset_profile.get('rows', 'N/A')}",
+            f"Columns: {dataset_profile.get('columns', 'N/A')}",
+            f"Target Column: {target_column}",
+            f"Task Type: {problem_type.upper()}"
+        ]
+        sections.append({"header": "Dataset Summary", "content": summary_lines})
         
-    sections.append({
-        "header": "Problem Definition", 
-        "content": problem_content
-    })
-    
+    # 2. Model Comparison Table
+    if metrics_df is not None:
+        sections.append({"header": "Model Comparison Table", "content": [metrics_df]})
+        
+    # 3. Best Model
     best_model = model_results.get("best_model_name", "Unknown")
-    sections.append({
-        "header": "Best Model Selected", 
-        "content": [f"Model Name: {best_model}"]
-    })
+    sections.append({"header": "Best Model", "content": [f"Selected Algorithm: {best_model}"]})
     
-    # Metrics
+    # 4. Evaluation Metrics
     metrics = model_results.get("metrics", {})
     if best_model in metrics:
         best_metrics = metrics[best_model]
-        
         def format_metric(val):
             if isinstance(val, (int, float)):
-                if val == 0:
-                    return "0.0000"
-                if abs(val) < 0.001:
-                    return f"{val:.4e}"
+                if val == 0: return "0.0000"
+                if abs(val) < 0.001: return f"{val:.4e}"
                 return f"{val:.4f}"
             return str(val)
             
         metric_lines = [f"{k}: {format_metric(v)}" for k, v in best_metrics.items() if k != "interpretation"]
-        sections.append({"header": "Performance Metrics", "content": metric_lines})
         
-        # Intelligent Metric Interpretation
+        if "interpretation" in best_metrics:
+            metric_lines.append("")
+            metric_lines.append(f"Interpretation: {best_metrics['interpretation']}")
+            
         r2 = best_metrics.get("r2")
         rmse = best_metrics.get("rmse")
-        
-        interp_lines = []
-        if "interpretation" in best_metrics:
-            interp_lines.append(f"Interpretation: {best_metrics['interpretation']}")
-            
-        # Check if near-perfect performance is detected
         if (r2 is not None and r2 >= 0.99) or (rmse is not None and rmse < 1e-5):
-            interp_lines.append("⚠️ Near-perfect performance detected. Verify that target leakage is not present.")
+            metric_lines.append("⚠️ Near-perfect performance detected. Verify that target leakage is not present.")
             
-        if interp_lines:
-            sections.append({"header": "Metric Interpretation", "content": interp_lines})
-        
-    # Model Insights
-    model_insights = insights.get("model", [])
-    if model_insights:
-        sections.append({"header": "Model Insights", "content": model_insights})
-        
-    # Prediction Summary
-    if prediction_summary:
-        pred_content = [
-            f"Prediction Dataset Source: {prediction_summary.get('source', 'N/A')}",
-            f"Number of Predictions Generated: {prediction_summary.get('count', 0)}",
-            f"Prediction File Location: {prediction_summary.get('file_location', 'N/A')}"
-        ]
-        sections.append({"header": "Prediction Summary", "content": pred_content})
-    
-    # Feature Importance
+        sections.append({"header": "Evaluation Metrics", "content": metric_lines})
+
+    # 5. Visualizations
+    if visualizations:
+        viz_content = []
+        for v_path in visualizations:
+            viz_content.append(f"[IMAGE]{v_path}")
+        sections.append({"header": "Visualizations", "content": viz_content})
+
+    # 6. Feature Importance
     feature_importance = model_results.get("feature_importance")
     if feature_importance:
         import pandas as pd
-        # Create DataFrame for nice table formatting in PDF
         fi_df = pd.DataFrame(
             [{"Feature Name": feat, "Importance Score": round(score, 4)} 
              for feat, score in list(feature_importance.items())[:15]]
         )
-        
         fi_content = [fi_df]
-        
-        # Embed feature importance plot if available
         fi_plot_path = model_results.get("feature_importance_plot")
         if fi_plot_path:
             fi_content.append(f"[IMAGE]{fi_plot_path}")
-            
-        sections.append({"header": "Top Feature Importance Analysis", "content": fi_content})
+        sections.append({"header": "Feature Importance", "content": fi_content})
+
+    # 7. Prediction Preview
+    if prediction_preview is not None:
+        sections.append({"header": "Prediction Preview", "content": [prediction_preview.head(10)]})
+
+    # 8. Forecast Preview
+    if forecast_preview is not None:
+        sections.append({"header": "Forecast Preview", "content": [forecast_preview.head(10)]})
         
     _create_pdf(str(output_path), "Model Training Report", sections, dataset_name)
 

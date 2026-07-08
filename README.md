@@ -87,9 +87,43 @@ The forecasting workflow looks for a date column and a numeric target. Prophet i
 
 The app provides a Run History dashboard that lists previous runs, generated PDFs, and metadata stored in each run folder.
 
-## BigQuery Integration (Coming Soon)
+## BigQuery Integration
 
-A stubbed `modules/bigquery_connector.py` exists as a placeholder. When enabled, the application will support uploading datasets, predictions, and metrics to BigQuery.
+This project includes a BigQuery connector (`modules/bigquery_connector.py`) which, when enabled, uploads run metadata, dataset profiles, and training metrics to Google BigQuery. Authentication is expected to be provided via a service account; the connector resolves credentials in the following order:
+
+- `GOOGLE_APPLICATION_CREDENTIALS` environment variable
+- `.env` file (project root)
+- `credentials/service_account.json` inside the project root
+
+Required environment variables (or `.env` keys):
+
+- `GOOGLE_APPLICATION_CREDENTIALS` — path to the service account JSON file (optional if using `credentials/service_account.json`)
+- `GCP_PROJECT_ID` — Google Cloud project id (can also be present in the service account JSON)
+- `BIGQUERY_DATASET` — dataset name (defaults to `ai_eda_platform` if unset)
+
+.env example (create a `.env` file in project root):
+
+```
+GOOGLE_APPLICATION_CREDENTIALS=credentials/service_account.json
+GCP_PROJECT_ID=your-gcp-project-id
+BIGQUERY_DATASET=ai_eda_platform
+BIGQUERY_LOCATION=US
+```
+
+Credentials folder structure (recommended):
+
+```
+<project-root>/
+	credentials/
+		service_account.json
+```
+
+Notes:
+
+- The connector will attempt to load credentials from the env var, then `.env`, then the `credentials/service_account.json` file.
+- The connector explicitly loads the service account credentials and passes them to `google.cloud.bigquery.Client()` to avoid relying on implicit ADC behavior.
+- If credentials or project id are missing, the connector raises clear `RuntimeError` messages describing the issue.
+
 
 ## Future Enhancements
 
